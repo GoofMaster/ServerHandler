@@ -106,6 +106,7 @@ namespace ServerHandler.SaverCore
 			//TriggerFileFound?.BeginInvoke(returnValueType.getString, tmpData, EndAsyncEvent, null);
 			uutParameters.Clear();		//Clear parameters from dictionary
 			File.Delete(Ex.FullPath);	//Delete info file
+			//
 		}
 
 		/// <summary>Async Callback designed to call TriggerFileDound event.</summary>
