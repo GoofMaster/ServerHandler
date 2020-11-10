@@ -8,6 +8,7 @@ using System.IO;
 using System.Security.Permissions;
 using System.Runtime.Remoting.Messaging;
 using System.Threading;
+using System.Windows.Forms;
 
 /// <summary>File renamer and saver Class Controller</summary>
 namespace ServerHandler.SaverCore
@@ -17,6 +18,7 @@ namespace ServerHandler.SaverCore
 
 /*<!-------------------- Public delegates (For use with Events) --------------------!>*/
 	public delegate void TriggerFileFoundHandler(returnValueType valType, object sender);
+	public delegate void ErrorOnServerHandler(returnValueType valType, object sender);
 
 	[PermissionSet(SecurityAction.Demand, Name = "FullTrust")]
 	public partial class Core
@@ -25,7 +27,7 @@ namespace ServerHandler.SaverCore
 		/// <summary>Set to true when Server is configured.</summary>
 		private bool _configured;
 		/// <summary>Target and destiny route strings.</summary>
-		private string _targetRoute, _destinyRoute, _triggerFileExtension, _imgFileExtension, endl;
+		private string _targetRoute, _destinyRoute, _triggerFileExtension, _imgFileExtension, _stationName, endl;
 		/// <summary>Dinamic enumerator for file assignation.</summary>
 		IEnumerable<string> fileList;
 
@@ -34,34 +36,54 @@ namespace ServerHandler.SaverCore
 
 /*<!-------------------- Event Handlers --------------------!>*/
 		public event TriggerFileFoundHandler TriggerFileFound;
+		public event ErrorOnServerHandler OnServerError;
 
-		public Core(string targetRoute, string destinyRoute, string triggerFileExtension, string imgFileExtension, bool useTextFileForSerials)
+		/// <summary>Setup File server</summary>
+		/// <param name="stationName">Station Name</param>
+		/// <param name="targetRoute">Temporal folder route</param>
+		/// <param name="destinyRoute">Target folder route</param>
+		/// <param name="triggerFileExtension">When file extension detected, trigger image store</param>
+		/// <param name="imgFileExtension">Image extension to search</param>
+		/// <param name="useTextFileForSerials">If true, use trigger file to store station parameters.</param>
+		public Core(string stationName, string targetRoute, string destinyRoute, string triggerFileExtension, string imgFileExtension, bool useTextFileForSerials)
 		{
 			//Assign locals
+			_stationName = stationName;
 			_targetRoute = targetRoute;
 			_destinyRoute = destinyRoute;
 			_triggerFileExtension = triggerFileExtension;
 			_imgFileExtension = imgFileExtension;
 			endl = Environment.NewLine;
+		}
 
+		public void InitializeFileServer()
+		{
 			//Try to open monitor port
 			try
 			{
+				ReportStringData("**************************************************************" + endl + "Inicializando servidor de archivos para " + _stationName + endl);
+				ReportStringData("   Estacion: " + _stationName + endl + "   Ruta de imagenes: " + _targetRoute + endl + "   Ruta de destino: " + _destinyRoute + endl);
 				//Initialize UUT dictionary locals
 				uutParameters = new Dictionary<string, string>();
 
+				//Initialize image monitoring variables
+				fileList = Directory.EnumerateFiles(_targetRoute, _imgFileExtension, SearchOption.TopDirectoryOnly);
 				//Initialize target route monitor system
 				fileWatcher = new FileSystemWatcher(_targetRoute, _triggerFileExtension);
 				fileWatcher.Filter = _triggerFileExtension;
 				fileWatcher.Path = _targetRoute;
 				fileWatcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.LastAccess;
-				fileWatcher.Created+= new FileSystemEventHandler(fSystem_OnChanged);   //OnCreated Event handler
+				fileWatcher.Created += new FileSystemEventHandler(fSystem_OnChanged);   //OnCreated Event handler
+
 				fileWatcher.EnableRaisingEvents = true;
-				//Initialize image monitoring variables
-				fileList = Directory.EnumerateFiles(_targetRoute, _imgFileExtension);
+				_configured = true;
 			}
-			catch(IOException ex)
-			{ }
+			catch (IOException ex)
+			{
+				ReportErrorString("**************************************************************" + endl + "   Error en configuracion de estacion: " + _stationName + endl + "   " + ex.Message + endl +
+					"**************************************************************" + endl);
+			}
+			return;
 		}
 
 /*<------ FileSystemWatcher Events ------>*/
@@ -70,10 +92,17 @@ namespace ServerHandler.SaverCore
 		/// <param name="Ex"></param>
 		private void fSystem_OnChanged(object sender, FileSystemEventArgs Ex)
 		{
+			if(!_configured)
+			{ return; }
+
 			//Locals
 			string Verbose, destDir, tmpFullName, tmpImgName;
 			string serialNum, testDate, stationName;
 			int imgCounter = 1;
+
+			//Reporter.
+			ReportStringData("**************************************************" + endl + "   Archivo de informacion de estacion de [" + _stationName + "]" + endl +
+				"   Hora: " + DateTime.Now.ToString() + endl);
 
 			Thread.Sleep(200);
 			GetParamsFromFile(Ex.FullPath);     //Get serial and UUT info
@@ -81,7 +110,10 @@ namespace ServerHandler.SaverCore
 
 			//Create folder if does not exist
 			if (!Directory.Exists(destDir))
+			{
+				ReportStringData("   El directorio \"" + destDir + "\" no existe, creando directorio..." + endl);
 				Directory.CreateDirectory(destDir);
+			}
 
 			//Get station and serial parameters
 			uutParameters.TryGetValue("Serial", out serialNum);
@@ -89,6 +121,7 @@ namespace ServerHandler.SaverCore
 			uutParameters.TryGetValue("Station", out stationName);
 			testDate = testDate.Trim().Replace('/', '-').Replace(':', '-').Replace(' ', '_').Replace('.', '-');
 			stationName = stationName.Trim().Replace(' ', '-');
+			ReportStringData("   Numero de serie: " + serialNum + endl + "   Hora de prueba de la estacion: " + testDate + endl + "   Imagenes encontradas: " + fileList.Count().ToString() + endl);
 
 			//Proccesate each picture in folder
 			foreach (string imgFile in fileList)
@@ -98,27 +131,25 @@ namespace ServerHandler.SaverCore
 
 				//Compose full file name
 				tmpFullName = Path.Combine(new string[] { destDir, serialNum + "_" + testDate + "_" + stationName + "_img_" + imgCounter.ToString() + Path.GetExtension(tmpImgName) });
+				ReportStringData("   Imagen: " + tmpFullName + endl);
 				File.Copy(tmpImgName, tmpFullName, true);	//Copy photo to backup directory
 				File.Delete(tmpImgName);	//Delete photo from target directory
 				imgCounter++;
 			}
 
-			//TriggerFileFound?.BeginInvoke(returnValueType.getString, tmpData, EndAsyncEvent, null);
 			uutParameters.Clear();		//Clear parameters from dictionary
-			File.Delete(Ex.FullPath);	//Delete info file
-			//
+			File.Delete(Ex.FullPath);   //Delete info file
+			ReportStringData("   Imagenes temporales copiadas..." + endl);
 		}
 
-		/// <summary>Async Callback designed to call TriggerFileDound event.</summary>
-		/// <param name="IAr"></param>
-		private void EndAsyncEvent(IAsyncResult IAr)
-		{
-			TriggerFileFoundHandler eventHandler = (TriggerFileFoundHandler)((AsyncResult)IAr).AsyncDelegate;
+		/// <summary>Generate Event sending string data to front panel</summary>
+		/// <param name="dataToReport">String data to be reported.</param>
+		private void ReportStringData(string dataToReport)
+		{ TriggerFileFound?.Invoke(returnValueType.getString, dataToReport); }
 
-			try
-			{ eventHandler.EndInvoke(IAr); }
-			catch
-			{ }
-		}
+		/// <summary>Generate Event when error is reported on File Server</summary>
+		/// <param name="errorToReport">String error to be reported.</param>
+		private void ReportErrorString(string errorToReport)
+		{ OnServerError?.Invoke(returnValueType.getString, errorToReport); }
 	}
 }
