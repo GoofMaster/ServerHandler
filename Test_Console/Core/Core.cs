@@ -25,9 +25,10 @@ namespace Test_Console.Core
 	{
 /*<!---------------- Internal variables ----------------!>*/
 		private string _serverAddress, _user, _password, _searchFolder, _tempFailUploads, _stationName, _searchImgExtension;
-		private bool _useIntegrityFileCheck, _setUserAsStationName, _LastConnectionSucess, _awaitKeyPressOnEnd;
+		private bool _useIntegrityFileCheck, _setUserAsStationName, _LastConnectionSucess, _awaitKeyPressOnEnd, _useExplicitTLS;
 		private string appRoute = AppDomain.CurrentDomain.BaseDirectory;
 		private string endl = Environment.NewLine;
+		private int _conPort, _connectionTout;
 		//FTP Server loaders
 		private FtpClient ftpConnection;
 		//File Handlers
@@ -62,6 +63,9 @@ namespace Test_Console.Core
 			clientCfg.ReadKeyFromConfig("Server_Parameters", "Server_Address", out _serverAddress);
 			clientCfg.ReadKeyFromConfig("Server_Parameters", "Server_User", out _user);
 			clientCfg.ReadKeyFromConfig("Server_Parameters", "Server_Password", out _password);
+			clientCfg.ReadKeyFromConfig("Server_Parameters", "Server_UseSecureFTP", out _useExplicitTLS);
+			clientCfg.ReadKeyFromConfig("Server_Parameters", "Server_Port", out _conPort);
+			clientCfg.ReadKeyFromConfig("Server_Parameters", "Server_MillisecsConnectionTOut", out _connectionTout);
 			//Load Engine parameters
 			clientCfg.ReadKeyFromConfig("Engine_Options", "Engine_SearchFolder", out _searchFolder);
 			clientCfg.ReadKeyFromConfig("Engine_Options", "Engine_TempFailUploadsFolder", out _tempFailUploads);
@@ -74,10 +78,26 @@ namespace Test_Console.Core
 
 			//Configure FTP Client
 			ftpConnection = new FtpClient(_serverAddress, new NetworkCredential(_user, _password));
-			ftpConnection.EncryptionMode = FtpEncryptionMode.Explicit;
 			ftpConnection.DownloadDataType = FtpDataType.Binary;
-			ftpConnection.ValidateCertificate += new FtpSslValidation(ftpClient_OnCertificationValidation);
+			ftpConnection.ConnectTimeout = _connectionTout;	//Set FTP Connection time out
+
+			// If TLS Explicit, try connection using FTPS Settings
+			if(_useExplicitTLS)
+			{
+				ftpConnection.EncryptionMode = FtpEncryptionMode.Explicit;
+				ftpConnection.ValidateCertificate += new FtpSslValidation(ftpClient_OnCertificationValidation);
+			}
+			else
+			{
+				ftpConnection.EncryptionMode = FtpEncryptionMode.None;
+				ftpConnection.Port = _conPort;
+			}
 			Console.WriteLine("Initializing Image backup Engine..." + endl + "   > Server Address: " + _serverAddress + endl + "   > User: " + _user + endl + "   > Search Folder: " + _searchFolder + endl + "   > Temporal Fail Uploads Folder: " + _tempFailUploads);
+			Console.Write("   > FTP Secure connection: ");
+			Console.ForegroundColor = _useExplicitTLS ? ConsoleColor.Green : ConsoleColor.Red;
+			Console.WriteLine(_useExplicitTLS ? "Enabled" : "Disabled");
+			Console.ForegroundColor = ConsoleColor.Gray;
+			Console.WriteLine(_useExplicitTLS ? "   > Using secure FTP Connection." : "   > Using simple FTP Connection.");
 
 			//Configure localFile Allocations
 			if(!Directory.Exists(_searchFolder))
@@ -177,6 +197,7 @@ namespace Test_Console.Core
 					{
 						try
 						{
+							Console.WriteLine("File: " + Path.GetFileName(renFileArray[Acc]) + ", changing name to:" + endl + "   > " + Path.GetFileName(fullRenPattern));
 							File.Move(renFileArray[Acc], fullRenPattern);
 							imgNumber++;
 							break;
@@ -234,8 +255,15 @@ namespace Test_Console.Core
 			//Connect to FTP Server
 			try
 			{
-				ftpConnection.Connect();
-				_LastConnectionSucess = true;
+				if(ftpConnection.IsConnected)
+				{ Console.WriteLine("FTP Connection was already opened before, using last connection settings."); }
+				else
+				{
+					Console.WriteLine("Opening FTP channel to upload pictures...");
+					ftpConnection.Connect();
+					_LastConnectionSucess = true;
+					Console.WriteLine("FTP Channel opened sucessfull.");
+				}
 			}
 			catch
 			{
