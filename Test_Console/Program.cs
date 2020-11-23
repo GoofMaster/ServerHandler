@@ -51,21 +51,25 @@ namespace Test_Console
 				}
 			}
 
+			//Initialize Core
+			EngineCore eCore = new EngineCore("ClientConfig.ini");
+			Console.WriteLine("---------------------------------------------------");
 			//Fail and Pass arguments must not be present at argument list
-			if(validationKeys.ContainsKey("PassStatus") && validationKeys.ContainsKey("FailStatus"))
+			if (validationKeys.ContainsKey("PassStatus") && validationKeys.ContainsKey("FailStatus"))
 			{
 				Console.WriteLine("   > Argument /f and /p can not be at same time, must be one at time");
+				if (eCore.AwaitKeyPressOnEnd)	//Await for key press flag is enabled
+				{ Console.WriteLine("Press any key to continue..."); Console.ReadLine(); }
 				return;
 			}
 			//Validate correct serial number
 			else if(!validationKeys.ContainsKey("SerialNumber") || !validationKeys.TryGetValue("SerialNumber", out bool keyValid) || !keyValid)
 			{
 				Console.WriteLine("   > Serial number " + serialNumber + " is not valid");
+				if (eCore.AwaitKeyPressOnEnd)   //Await for key press flag is enabled
+				{ Console.WriteLine("Press any key to continue..."); Console.ReadLine(); }
 				return;
 			}
-
-			//Initialize Core
-			EngineCore eCore = new EngineCore("ClientConfig.ini");
 
 			//Check in local cache for previous failed files
 			Console.WriteLine("Checking for available images at Offline cache direcory...");
@@ -98,11 +102,9 @@ namespace Test_Console
 			//Purge Directory
 			eCore.PurgeSearchFolder();
 
-			if(eCore.AwaitKeyPressOnEnd)
-			{
-				Console.WriteLine("Press any key to continue...");
-				Console.ReadLine();
-			}
+			if (eCore.AwaitKeyPressOnEnd)   //Await for key press flag is enabled
+			{ Console.WriteLine("Press any key to continue..."); Console.ReadLine(); }
+			return;
 		}
 	}
 }
